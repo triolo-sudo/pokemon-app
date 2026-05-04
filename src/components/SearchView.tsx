@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { fetchPokemon } from "@/lib/fetchPokemon"
 import PokemonCard from "./PokemonCard"
 import Popup from "./Popup"
@@ -19,13 +19,25 @@ export default function SearchView({
     removeFavorite
 }: Props) {
     // APIから取得した表示データ
-    const [pokemon, setPokemon] = useState<Pokemon | null>(null)
+    const [pokemons, setPokemons] = useState<Pokemon[]>([])
+
+    // 🔹 全検索結果（名前だけ保持）
+    const [allResults, setAllResults] = useState<string[]>([])
+
+    // 🔹 ページ（10件単位）
+    const [page, setPage] = useState(1)
 
     // ユーザーが入力する文字
     const [pokemonName, setPokemonName] = useState("")
 
     // Popup用message
     const [popupMessage, setPopupMessage] = useState<string | null>(null)
+
+    // スピナー
+    const [loading, setLoading] = useState(false)
+
+    // 抽出結果数
+    const [totalCount, setTotalCount] = useState(0)
 
     // Popup表示関数
     const showPopup = (message: string) => {
@@ -36,10 +48,7 @@ export default function SearchView({
         }, 2000)
     }
 
-    // スピナー
-    const [loading, setLoading] = useState(false)
-
-    // 検索関数
+    // 🔍 検索
     async function handleSearch() {
         // 入力チェック
         if (!pokemonName.trim()) {
@@ -51,16 +60,79 @@ export default function SearchView({
 
         // 検索
         try {
-            const data = await fetchPokemon(pokemonName)
-            setPokemon(data)
-            // ↑の後にstateが更新されて、Reactが画面を自動更新
+            // ① 全件取得
+            const res = await fetch("https://pokeapi.co/api/v2/pokemon?limit=1000")
+            const list = await res.json()
+
+            // ② 前方一致フィルタ
+            const filtered = list.results.filter((p: any) =>
+                p.name.toLowerCase().startsWith(pokemonName.toLowerCase())
+            )
+
+            if (filtered.length === 0) {
+                showPopup("No Pokémon found")
+                setPokemons([])
+                setAllResults([])
+                return
+            }
+
+            // 🔹 全体件数
+            setTotalCount(filtered.length)
+
+            // 🔹 全結果（名前だけ保存）
+            setAllResults(filtered.map((p: any) => p.name))
+
+            // 🔹 ページリセット
+            setPage(1)
         } catch (error) {
-            showPopup("No Pokémon found")
-            setPokemon(null)
+            showPopup("Error occurred")
+            setPokemons([])
         } finally {
             setLoading(false)
         }
     }
+
+    // 🔹 page or allResults が変わったら表示更新
+    useEffect(() => {
+        async function loadMore() {
+            if (allResults.length === 0) return
+
+            setLoading(true)
+
+            // 🔹 表示する範囲（10件ずつ）
+            const slice = allResults.slice(0, page * 10)
+
+            // 🔹 詳細取得
+            const results = await Promise.all(
+                slice.map(name => fetchPokemon(name))
+            )
+
+            setPokemons(results)
+            setLoading(false)
+        }
+
+        loadMore()
+    }, [page, allResults])
+
+    // 🔹 スクロールで次ページ
+    useEffect(() => {
+        function handleScroll() {
+            // 画面下に近づいたら発火
+            if (
+                // 👉 今見えてる画面の下 >= 👉 ページ全体の高さ - 👉 少し手前で発火（UX向上）
+                window.innerHeight + window.scrollY >=
+                document.body.offsetHeight - 200
+            ) {
+                // 🔹 まだ続きがあるときだけ増やす
+                if (page * 10 < allResults.length) {
+                    setPage(prev => prev + 1)
+                }
+            }
+        }
+
+        window.addEventListener("scroll", handleScroll)
+        return () => window.removeEventListener("scroll", handleScroll)
+    }, [page, allResults])
 
     return (
         <div className="min-h-screen">
@@ -86,18 +158,31 @@ export default function SearchView({
                     Search
                 </button>
 
-                {/* 🌙 ローディング(入力 → loading → 結果 👉 だから「結果の前」に置く) */}
-                {loading && <PokeLoading />}
+                {/* 抽出ポケモン数表示 */}
+                {pokemonName && totalCount > 0 && (
+                    <div className="
+                        text-center
+                        text-sm
+                        text-skyText/60
+                        tracking-wide
+                    ">
+                        {totalCount} Pokémon found
+                    </div>
+                )}
 
-                {/* 結果 */}
-                {pokemon && (
+                {/* 🔹 複数表示 */}
+                {pokemons.map((p) => (
                     <PokemonCard
-                        pokemon={pokemon}
+                        key={p.name}
+                        pokemon={p}
                         addFavorite={addFavorite}
-                        isFavorite={favorites.some(p => p.name === pokemon.name)}
+                        isFavorite={favorites.some(f => f.name === p.name)}
                         removeFavorite={removeFavorite}
                     />
-                )}
+                ))}
+
+                {/* 🌙 ローディング */}
+                {loading && <PokeLoading />}
             </div>
         </div>
     )

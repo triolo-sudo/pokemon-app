@@ -20,12 +20,18 @@ export default function TypeView({
 }: Props) {
     const [types, setTypes] = useState<string[]>([])
     const [selectedType, setSelectedType] = useState<string | null>(null)
+
+    // 🔹 全ポケモン名（← ここがコア：全部持つ）
     const [pokemonNames, setPokemonNames] = useState<string[]>([])
 
-    // Type Search Result
+    // 🔹 表示用ポケモン
     const [pokemons, setPokemons] = useState<Pokemon[]>([])
+
     const [loading, setLoading] = useState(false)
     const [totalCount, setTotalCount] = useState(0)
+
+    // 🔹 追加：ページ管理（10件単位）
+    const [page, setPage] = useState(1)
 
     // Pokemon Modal
     const [selectedPokemon, setSelectedPokemon] = useState<Pokemon | null>(null)
@@ -49,22 +55,61 @@ export default function TypeView({
 
         setTotalCount(data.pokemon.length) // ← 全体数
 
-        const names: string[] = data.pokemon
-            .map((p: any) => p.pokemon.name)
-            .slice(0, 10) // 🌿 ここ重要
-
-        // 🌿 これ追加
-        setPokemonNames(names)
-
-        // 👇 ここが今回のメイン 10個のAPIを同時に取る 👉 1個ずつ待つより速い
-        const results = await Promise.all(
-            names.map(name => fetchPokemon(name))
+        // 🔹 修正：sliceしない（全部保持）
+        const names: string[] = data.pokemon.map(
+            (p: any) => p.pokemon.name
         )
 
-        setPokemons(results)
+        // 🔹 全部保存
+        setPokemonNames(names)
+
+        // 🔹 ページリセット
+        setPage(1)
 
         setLoading(false) // 🌿 終了
     }
+
+    // 🔹 追加：page or pokemonNamesが変わったら表示更新
+    useEffect(() => {
+        async function loadMore() {
+            if (pokemonNames.length === 0) return
+
+            setLoading(true)
+
+            // 🔹 表示範囲（10件ずつ増える）
+            const slice = pokemonNames.slice(0, page * 10)
+
+            // 🔹 詳細取得（Promise.all）
+            const results = await Promise.all(
+                slice.map(name => fetchPokemon(name))
+            )
+
+            setPokemons(results)
+            setLoading(false)
+        }
+
+        loadMore()
+    }, [page, pokemonNames])
+
+    // 🔹 コンテナ内スクロール検知（← ここが重要）
+    useEffect(() => {
+        function handleScroll() {
+            if (
+                window.innerHeight + window.scrollY >=
+                document.body.offsetHeight - 50
+            ) {
+                if (page * 10 < pokemonNames.length) {
+                    setPage(prev => prev + 1)
+                }
+            }
+        }
+
+        window.addEventListener("scroll", handleScroll)
+
+        return () => {
+            window.removeEventListener("scroll", handleScroll)
+        }
+    }, [page, pokemonNames])
 
     function formatTypeName(name: string) {
         return name.charAt(0).toUpperCase() + name.slice(1)
@@ -113,26 +158,25 @@ export default function TypeView({
                     </div>
                 )}
 
-                {/* ローディング */}
-                {loading && <PokeLoading />}
+                {/* 🔹 一覧だけスクロールするエリア */}
+                <div className="space-y-4 pt-4">
+                    {pokemons.map(pokemon => (
+                        <PokemonCard
+                            key={pokemon.name}
+                            pokemon={pokemon}
+                            onClick={() => {
+                                setSelectedPokemon(pokemon)
+                                setIsModalOpen(true)
+                            }}
+                            addFavorite={addFavorite}
+                            removeFavorite={removeFavorite}
+                            isFavorite={favorites.some(p => p.name === pokemon.name)}
+                        />
+                    ))}
 
-                {/* 一覧 */}
-                {!loading && pokemons.length > 0 && (
-                    <div className="space-y-4 pt-4">
-                        {pokemons.map(pokemon => (
-                            <PokemonCard
-                                key={pokemon.name}
-                                pokemon={pokemon}
-                                onClick={() => {
-                                    setSelectedPokemon(pokemon)
-                                    setIsModalOpen(true)
-                                }}
-                                addFavorite={addFavorite}
-                                removeFavorite={removeFavorite}
-                                isFavorite={favorites.some(p => p.name === pokemon.name)}
-                            />))}
-                    </div>
-                )}
+                    {/* 🔹 下にローディング出すと自然 */}
+                    {loading && <PokeLoading />}
+                </div>
 
                 {/* モーダル */}
                 {isModalOpen && selectedPokemon && (
